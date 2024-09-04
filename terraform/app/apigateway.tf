@@ -1,5 +1,27 @@
 resource "aws_api_gateway_rest_api" "app_lambda" {
   name = "${local.name_prefix}-apigw-${local.name_suffix}"
+  body = jsonencode({
+    openapi = "3.0.1"
+    info = {
+      title   = "example"
+      version = "1.0"
+    }
+    paths = {
+      "/path1" = {
+        get = {
+          x-amazon-apigateway-integration = {
+            httpMethod           = "GET"
+            payloadFormatVersion = "1.0"
+            type                 = "HTTP_PROXY"
+            uri                  = "https://ip-ranges.amazonaws.com/ip-ranges.json"
+          }
+        }
+      }
+    }
+  })
+  endpoint_configuration {
+    types = ["REGIONAL"]
+  }
 }
 
 resource "aws_api_gateway_deployment" "app_lambda" {
@@ -8,7 +30,6 @@ resource "aws_api_gateway_deployment" "app_lambda" {
     redeployment = sha1(jsonencode([
       aws_api_gateway_resource.app_lambda.id,
       aws_api_gateway_method.app_lambda.id,
-      aws_api_gateway_integration.app_lambda.id
     ]))
   }
   lifecycle {
@@ -17,14 +38,13 @@ resource "aws_api_gateway_deployment" "app_lambda" {
   depends_on = [
     aws_api_gateway_method.app_lambda,
     aws_api_gateway_resource.app_lambda,
-    aws_api_gateway_integration.app_lambda
   ]
 }
 
 resource "aws_api_gateway_stage" "app_lambda" {
   deployment_id = aws_api_gateway_deployment.app_lambda.id
   rest_api_id   = aws_api_gateway_rest_api.app_lambda.id
-  stage_name    = var.stage_name
+  stage_name    = var.api_gateway_stage_name
 }
 
 resource "aws_api_gateway_method" "app_lambda" {
@@ -33,16 +53,6 @@ resource "aws_api_gateway_method" "app_lambda" {
   resource_id      = aws_api_gateway_resource.app_lambda.id
   rest_api_id      = aws_api_gateway_rest_api.app_lambda.id
   api_key_required = false
-}
-
-
-resource "aws_api_gateway_integration" "app_lambda" {
-  rest_api_id             = aws_api_gateway_rest_api.app_lambda.id
-  resource_id             = aws_api_gateway_resource.app_lambda.id
-  http_method             = aws_api_gateway_method.app_lambda.http_method
-  integration_http_method = "POST"
-  type                    = "AWS_PROXY"
-  uri                     = aws_lambda_alias.app_lambda_function_alias.invoke_arn
 }
 
 resource "aws_api_gateway_method_settings" "app_lambda" {
@@ -98,14 +108,14 @@ data "aws_iam_policy_document" "app_lambda_cloudwatch" {
 #   role   = aws_iam_role.app_lambda_cloudwatch.id
 # }
 
-resource "aws_lambda_permission" "app_lambda_apigw" {
-  statement_id  = "${local.name_prefix}-apigw-permission-${local.name_suffix}"
-  action        = "lambda:InvokeFunction"
-  function_name = aws_lambda_function.app_lambda_function.function_name
-  principal     = "apigateway.amazonaws.com"
-  source_arn    = "${aws_api_gateway_rest_api.app_lambda.execution_arn}/*/*/*"
-  qualifier     = aws_lambda_alias.app_lambda_function_alias.name
-}
+# resource "aws_lambda_permission" "app_lambda_apigw" {
+#   statement_id  = "${local.name_prefix}-apigw-permission-${local.name_suffix}"
+#   action        = "lambda:InvokeFunction"
+#   function_name = aws_lambda_function.app_lambda_function.function_name
+#   principal     = "apigateway.amazonaws.com"
+#   source_arn    = "${aws_api_gateway_rest_api.app_lambda.execution_arn}/*/*/*"
+#   qualifier     = aws_lambda_alias.app_lambda_function_alias.name
+# }
 
 resource "aws_api_gateway_account" "app_lambda" {
   cloudwatch_role_arn = aws_iam_role.app_lambda_cloudwatch.arn
@@ -113,6 +123,6 @@ resource "aws_api_gateway_account" "app_lambda" {
 
 
 resource "aws_cloudwatch_log_group" "app_apigw_log_group" {
-  name              = "API-Gateway-Execution-Logs_${aws_api_gateway_rest_api.app_lambda.id}/${var.stage_name}"
+  name              = "API-Gateway-Execution-Logs_${aws_api_gateway_rest_api.app_lambda.id}/${var.api_gateway_stage_name}"
   retention_in_days = var.log_retention_in_days
 }
